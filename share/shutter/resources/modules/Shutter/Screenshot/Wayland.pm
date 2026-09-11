@@ -53,6 +53,8 @@ sub xdg_portal {
 
 	my $pixbuf;
 	my $portal_error;
+	my $cancelled;
+	delete $self->{_error_text};
 
 	eval {
 		my $portal_service = $bus->get_service('org.freedesktop.portal.Desktop');
@@ -92,7 +94,8 @@ sub xdg_portal {
 		if (!defined $num || $num != 0) {
             if (defined $num && $num == 1) {
                 # portal Response: 1 = user cancelled -> treat as abort (code 5), not error
-                return 5;
+                $cancelled = 1;
+                return;
             }
             $portal_error = "Response " . (defined $num ? $num : "timeout") . " from XDG portal";
             return;
@@ -107,20 +110,25 @@ sub xdg_portal {
 
 		$giofile->delete;
 	};
+	# A return inside eval only leaves that block. Handle cancellation and
+	# errors before accessing the pixbuf or recording a successful capture.
+	my $exception = $@;
+	if ($exception) {
+		$self->{_error_text} = $exception;
+		return 9;
+	}
+	return 5 if $cancelled;
+	if (defined $portal_error) {
+		$self->{_error_text} = $portal_error;
+		return 9;
+	}
+
 	if (defined $self->{_monitor}) {
 		$pixbuf = crop_to_monitor($pixbuf, $self->{_gdk_screen}, $self->{_monitor});
 	}
 
 	#a history marker makes this capture repeatable through redoshot
 	$self->{_history} = Shutter::Screenshot::History->new($self->{_sc});
-	if ($@) {
-		$self->{_error_text} = $@;
-		return 9;
-	}
-	if (defined $portal_error) {
-		$self->{_error_text} = $portal_error;
-		return 9;
-	}
 
 	# get name
 	if ($self->{_target} eq 1) {
