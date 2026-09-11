@@ -960,6 +960,11 @@ sub STARTUP {
 		fct_check_installed_upload_plugins();
 	}
 
+	unless ($x11_supported) {
+		my $wayland_info = Gtk3::Label->new($d->get("Available capture modes on Wayland depend on your desktop environment. Some modes require manual selection."));
+		$wayland_info->set_line_wrap(TRUE);
+		$vbox->pack_start($wayland_info, FALSE, TRUE, 0);
+	}
 
 	$vbox->pack_start($st->create_toolbar, FALSE, TRUE, 0);
 
