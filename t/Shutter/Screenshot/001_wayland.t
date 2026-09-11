@@ -20,6 +20,7 @@ use Shutter::Screenshot::Wayland;
     sub connect_to_signal { $_[0]->{callback} = $_[2]; 1 }
     sub disconnect_from_signal { delete $_[0]->{callback} }
     sub Screenshot {
+        $_[0]->{options} = $_[2];
         die "Portal unavailable\n" if $_[0]->{throw};
         return '/request/test';
     }
@@ -105,6 +106,50 @@ my $crop_calls = 0;
             is($capture->get_history, $history, 'cancel preserves previous history');
         };
     }
+    for my $mode ('menu', 'tray_menu', 'tooltip', 'tray_tooltip') {
+        subtest $mode => sub {
+            my $popup = Shutter::Screenshot::Wayland::popup_mode($mode);
+            like($popup, qr/^(menu|tooltip)$/, 'popup mode normalized');
+            my $capture = bless {
+                _sc => WaylandTest::Object->new, _target => 1,
+                _interactive => 1, _popup_mode => $popup, _repeat_delay => 10,
+            }, 'Shutter::Screenshot::Wayland';
+            my ($selected, $waited) = (0, 0);
+            my $cancel_selection;
+            local *Shutter::Screenshot::Wayland::select_popup = sub {
+                is($_[1], $pixbuf, 'selector receives the captured image');
+                $selected++;
+                return $cancel_selection ? undef : $pixbuf;
+            };
+            local *Shutter::Screenshot::Wayland::wait_for_popup = sub { $waited++ };
+            $portal->{response} = 0;
+            $portal->{output} = {uri => 'file:///test/screenshot.png'};
+            is($capture->xdg_portal, $pixbuf, 'popup captured and selected');
+            is_deeply($portal->{options}->{interactive}, Net::DBus::dbus_boolean(0), 'no live chooser before capture');
+            ok(!exists $portal->{options}->{target}, 'legacy portal does not receive unsupported target option');
+            is($capture->get_action_name, $popup eq 'menu' ? 'Menu' : 'Tooltip', 'popup action named correctly');
+            is($selected, 1, 'selector shown exactly once');
+            my $history = $capture->get_history;
+            $cancel_selection = 1;
+            is($capture->redo_capture, 5, 'cancelling crop aborts repeat');
+            is($waited, 1, 'repeat waits for the popup to be reopened');
+            is($capture->get_history, $history, 'crop cancellation preserves history');
+            $portal->{response} = 1;
+            is($capture->xdg_portal, 5, 'portal cancellation is an abort');
+            is($selected, 2, 'portal cancellation never opens selector');
+            $portal->{response} = 2;
+            is($capture->xdg_portal, 9, 'portal failure is an error');
+            is($selected, 2, 'portal failure never opens selector');
+            $capture->{_interactive} = 0;
+            $portal->{response} = 0;
+            $cancel_selection = 0;
+            is($capture->xdg_portal, $pixbuf, 'popup works with target-aware portal');
+            is_deeply($portal->{options}->{target}, Net::DBus::dbus_uint32(1), 'target-aware portal receives desktop target');
+            is_deeply($portal->{options}->{interactive}, Net::DBus::dbus_boolean(0), 'target-aware portal is also non-interactive');
+        };
+    }
+    ok(!defined Shutter::Screenshot::Wayland::popup_mode('window'), 'ordinary capture is not a popup');
+
 }
 
 done_testing;
